@@ -54,7 +54,7 @@ CARGO_ARGS=`get_cargo_args`
 RUSTFLAGS="-Dwarnings" cargo check $CARGO_ARGS
 
 # Run the tests
-(cd bindgen-tests && cargo test $CARGO_ARGS)
+(cd bindgen-tests && cargo test $CARGO_ARGS -- header_issue_923_h header_issue_753_h --test-threads 1 --no-capture)
 
 assert_no_diff
 

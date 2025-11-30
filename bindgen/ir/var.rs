@@ -198,6 +198,7 @@ impl ClangSubItemParser for Var {
                 let value = parse_macro(ctx, &cursor);
 
                 let Some((id, value)) = value else {
+                    eprintln!("parse_macro: skipped {}", cursor.spelling());
                     return Err(ParseError::Continue);
                 };
 
@@ -500,7 +501,8 @@ fn parse_macro_clang_fallback(
     }
 
     let ftu = ctx.try_ensure_fallback_translation_unit()?;
-    let contents = format!("int main() {{ {}; }}", cursor.spelling());
+    let macro_name = cursor.spelling();
+    let contents = format!("int main() {{ {}; }}", macro_name);
     ftu.reparse(&contents).ok()?;
     // Children of root node of AST
     let root_children = ftu.translation_unit().cursor().collect_children();
@@ -517,15 +519,23 @@ fn parse_macro_clang_fallback(
     // First child in all_exprs is the expression utilizing the given macro to
     // be evaluated, which hould be ParenExpr
     let paren = paren_exprs.first()?;
+    if unsafe { clang_isExpression(paren.kind()) > 0 } {
+        eprintln!("{macro_name} is expression")
+    } else if unsafe { clang_isDeclaration(paren.kind()) > 0 } {
+        eprintln!("{macro_name} is declaration")
+    }
     let result = paren.evaluate()?;
     let value_type = result.value_type().canonical_type();
     if !value_type.is_valid() {
+        eprintln!("{macro_name}: unknown type");
         return None;
     }
     let name = cursor.spelling().into_bytes();
+    eprintln!("{macro_name}: check {result:?}, kind={}", result.kind());
     Some((
         name,
         if let Some(int_lit) = result.as_int() {
+            eprintln!("{macro_name} is int");
             match value_type.kind() {
                 // Integers
                 CXType_Int => MacroEvalResult::Int(int_lit, MacroIntType::Int),
@@ -552,16 +562,16 @@ fn parse_macro_clang_fallback(
                 }
                 // Chars
                 CXType_Char16 => MacroEvalResult::Char(MacroCharValue::Char16(
-                    int_lit.try_into().ok()?,
+                    int_lit.try_into().unwrap(),
                 )),
                 CXType_Char32 => MacroEvalResult::Char(MacroCharValue::Char32(
-                    int_lit.try_into().ok()?,
+                    int_lit.try_into().unwrap(),
                 )),
                 CXType_Char_S | CXType_SChar => MacroEvalResult::Char(
-                    MacroCharValue::SChar(int_lit.try_into().ok()?),
+                    MacroCharValue::SChar(int_lit.try_into().unwrap()),
                 ),
                 CXType_Char_U | CXType_UChar => MacroEvalResult::Char(
-                    MacroCharValue::UChar(int_lit.try_into().ok()?),
+                    MacroCharValue::UChar(int_lit.try_into().unwrap()),
                 ),
                 CXType_WChar => {
                     MacroEvalResult::Char(MacroCharValue::WChar(int_lit))
@@ -572,7 +582,7 @@ fn parse_macro_clang_fallback(
                         Bindgen does not support it yet.",
                         cursor.spelling(),
                     );
-                    return None;
+                    panic!("name={} {result:?}", cursor.spelling());
                 }
             }
         } else if let Some(str_lit) = result.as_str_literal() {
@@ -592,7 +602,7 @@ fn parse_macro_clang_fallback(
                             Bindgen does not support it yet.",
                             cursor.spelling(),
                         );
-                        return None;
+                        panic!("name={} {result:?}", cursor.spelling());
                     }
                 },
             )
